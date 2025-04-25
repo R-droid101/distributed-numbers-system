@@ -1,4 +1,31 @@
 services:
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASS}
+      - POSTGRES_DB=${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  consumer:
+    build: ./consumer
+    ports:
+      - "9090:9090"
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
+      - DB_NAME=${DB_NAME}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - RUNNING_IN_DOCKER=true
+
   publisher1:
     build: ./publisher
     ports:
@@ -48,3 +75,6 @@ services:
       - START_NUMBER=41
       - END_NUMBER=50
       - AUTH_TOKEN=${AUTH_TOKEN}
+
+volumes:
+  pgdata:
