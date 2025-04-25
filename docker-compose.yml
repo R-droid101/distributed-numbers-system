@@ -1,0 +1,50 @@
+services:
+  publisher1:
+    build: ./publisher
+    ports:
+      - "8081:8080"
+    environment:
+      - PUBLISHER_ID=publisher-1
+      - START_NUMBER=1
+      - END_NUMBER=10
+      - AUTH_TOKEN=${AUTH_TOKEN}
+
+  publisher2:
+    build: ./publisher
+    ports:
+      - "8082:8080"
+    environment:
+      - PUBLISHER_ID=publisher-2
+      - START_NUMBER=11
+      - END_NUMBER=20
+      - AUTH_TOKEN=${AUTH_TOKEN}
+
+  publisher3:
+    build: ./publisher
+    ports:
+      - "8083:8080"
+    environment:
+      - PUBLISHER_ID=publisher-3
+      - START_NUMBER=21
+      - END_NUMBER=30
+      - AUTH_TOKEN=${AUTH_TOKEN}
+
+  publisher4:
+    build: ./publisher
+    ports:
+      - "8084:8080"
+    environment:
+      - PUBLISHER_ID=publisher-4
+      - START_NUMBER=31
+      - END_NUMBER=40
+      - AUTH_TOKEN=${AUTH_TOKEN}
+
+  publisher5:
+    build: ./publisher
+    ports:
+      - "8085:8080"
+    environment:
+      - PUBLISHER_ID=publisher-5
+      - START_NUMBER=41
+      - END_NUMBER=50
+      - AUTH_TOKEN=${AUTH_TOKEN}
