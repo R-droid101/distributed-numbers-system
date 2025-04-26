@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS published_numbers (
+  id SERIAL PRIMARY KEY,
+  number INTEGER NOT NULL,
+  publisher_id TEXT NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,8 +9,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/redis/go-redis/v9"
 )
 
 type Config struct {
@@ -17,6 +20,7 @@ type Config struct {
 	StartNumber int
 	EndNumber   int
 	AuthToken   string
+	RedisAddr   string
 }
 
 type Response struct {
@@ -30,11 +34,15 @@ type NumbersResponse struct {
 	Numbers     []int  `json:"numbers"`
 }
 
+var redisClient *redis.Client
+var ctx = context.Background()
+
 func main() {
 	publisherID := getEnvWithDefault("PUBLISHER_ID", "publisher-1")
 	startNumber := getEnvAsIntWithDefault("START_NUMBER", 1)
 	endNumber := getEnvAsIntWithDefault("END_NUMBER", 10)
 	authToken := getEnvWithDefault("AUTH_TOKEN", "changeme")
+	redisAddr := getEnvWithDefault("REDIS_ADDR", "redis:6379")
 	port := getEnvWithDefault("PORT", "8080")
 
 	config := Config{
@@ -42,6 +50,15 @@ func main() {
 		StartNumber: startNumber,
 		EndNumber:   endNumber,
 		AuthToken:   authToken,
+		RedisAddr:   redisAddr,
+	}
+
+	redisClient = redis.NewClient(&redis.Options{
+		Addr: config.RedisAddr,
+	})
+
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		log.Fatalf("Failed to connect to Redis at %s: %v", config.RedisAddr, err)
 	}
 
 	router := mux.NewRouter()
@@ -58,6 +75,19 @@ func createPublishHandler(config Config) http.HandlerFunc {
 		numbers := make([]int, 0, config.EndNumber-config.StartNumber+1)
 		for num := config.StartNumber; num <= config.EndNumber; num++ {
 			numbers = append(numbers, num)
+
+			msg := map[string]interface{}{
+				"number":       num,
+				"publisher_id": config.PublisherID,
+				"timestamp":    time.Now().Format(time.RFC3339),
+			}
+
+			if err := redisClient.XAdd(ctx, &redis.XAddArgs{
+				Stream: "numbers-stream",
+				Values: msg,
+			}).Err(); err != nil {
+				log.Printf("❌ Failed to push number %d to stream: %v", num, err)
+			}
 		}
 
 		data := NumbersResponse{
@@ -67,7 +97,7 @@ func createPublishHandler(config Config) http.HandlerFunc {
 
 		respondWithJSON(w, http.StatusOK, Response{
 			Success: true,
-			Message: fmt.Sprintf("Successfully published %d numbers", len(numbers)),
+			Message: fmt.Sprintf("Pushed %d numbers to stream", len(numbers)),
 			Data:    data,
 		})
 	}

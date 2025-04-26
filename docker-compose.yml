@@ -1,4 +1,11 @@
 services:
+  redis:
+    image: redis:7.2
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
   db:
     image: postgres:15
     environment:
@@ -9,6 +16,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
   consumer:
     build: ./consumer
@@ -30,6 +38,9 @@ services:
     build: ./publisher
     ports:
       - "8081:8080"
+    depends_on:
+      - redis
+      - db
     environment:
       - PUBLISHER_ID=publisher-1
       - START_NUMBER=1
@@ -40,6 +51,9 @@ services:
     build: ./publisher
     ports:
       - "8082:8080"
+    depends_on:
+      - redis
+      - db
     environment:
       - PUBLISHER_ID=publisher-2
       - START_NUMBER=11
@@ -50,6 +64,9 @@ services:
     build: ./publisher
     ports:
       - "8083:8080"
+    depends_on:
+      - redis
+      - db
     environment:
       - PUBLISHER_ID=publisher-3
       - START_NUMBER=21
@@ -60,6 +77,9 @@ services:
     build: ./publisher
     ports:
       - "8084:8080"
+    depends_on:
+      - redis
+      - db
     environment:
       - PUBLISHER_ID=publisher-4
       - START_NUMBER=31
@@ -70,6 +90,9 @@ services:
     build: ./publisher
     ports:
       - "8085:8080"
+    depends_on:
+      - redis
+      - db
     environment:
       - PUBLISHER_ID=publisher-5
       - START_NUMBER=41
@@ -78,3 +101,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

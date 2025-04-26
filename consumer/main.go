@@ -1,21 +1,27 @@
 package main
 
 import (
+	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 	_ "github.com/lib/pq"
 )
 
-type IncomingNumber struct {
-	Number      int    `json:"number"`
-	PublisherID string `json:"publisher_id"`
+type Config struct {
+	AuthToken string
+	RedisAddr string
+	DBHost    string
+	DBPort    string
+	DBUser    string
+	DBPass    string
+	DBName    string
 }
 
 type Response struct {
@@ -23,114 +29,97 @@ type Response struct {
 	Message string `json:"message"`
 }
 
+var redisClient *redis.Client
 var db *sql.DB
+var ctx = context.Background()
 
 func main() {
-	var err error
-
 	if os.Getenv("RUNNING_IN_DOCKER") == "" {
-		err = godotenv.Load("../.env")
-		if err != nil {
-			log.Fatal("Failed to load env vars from root folder")
-		}
+		_ = godotenv.Load("../.env")
 	}
 
-	connStr := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		getEnv("DB_HOST", "localhost"),
-		getEnv("DB_PORT", "5432"),
-		getEnv("DB_USER", "testuser"),
-		getEnv("DB_PASS", "postgres"),
-		getEnv("DB_NAME", "numbersdb"),
-	)
-
-	if err := waitForDB(connStr); err != nil {
-		log.Fatal(err)
+	config := Config{
+		AuthToken: getEnvWithDefault("AUTH_TOKEN", "changeme"),
+		RedisAddr: getEnvWithDefault("REDIS_ADDR", "redis:6379"),
+		DBHost:    getEnvWithDefault("DB_HOST", "localhost"),
+		DBPort:    getEnvWithDefault("DB_PORT", "5432"),
+		DBUser:    getEnvWithDefault("DB_USER", "user"),
+		DBPass:    getEnvWithDefault("DB_PASS", "password"),
+		DBName:    getEnvWithDefault("DB_NAME", "numbersdb"),
 	}
 
-	db, err = sql.Open("postgres", connStr)
-	if err != nil {
-		log.Fatal("Final DB open failed:", err)
-	}
+	dbConnStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		config.DBHost, config.DBPort, config.DBUser, config.DBPass, config.DBName)
 
-	if err := ensureTableExists(db); err != nil {
-		log.Fatal("Failed to ensure table exists:", err)
-	}
-
-	http.HandleFunc("/consume", consumeHandler)
-	log.Println("Consumer listening on :9090")
-	log.Fatal(http.ListenAndServe(":9090", nil))
-}
-
-func consumeHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var data IncomingNumber
-	err := json.NewDecoder(r.Body).Decode(&data)
-	if err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
-		return
-	}
-
-	log.Printf("Received: %d from %s", data.Number, data.PublisherID)
-
-	_, err = db.Exec(
-		`INSERT INTO published_numbers (number, publisher_id, received_at)
-		 VALUES ($1, $2, $3)`,
-		data.Number, data.PublisherID, time.Now(),
-	)
-	if err != nil {
-		log.Println("Insert failed:", err)
-		http.Error(w, "Database insert failed", http.StatusInternalServerError)
-		return
-	}
-
-	respondJSON(w, http.StatusOK, Response{true, "Number received and stored"})
-}
-
-func respondJSON(w http.ResponseWriter, status int, resp Response) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(resp)
-}
-
-func ensureTableExists(db *sql.DB) error {
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS published_numbers (
-			id SERIAL PRIMARY KEY,
-			number INTEGER NOT NULL,
-			publisher_id TEXT NOT NULL,
-			received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)
-	`)
-	return err
-}
-
-func waitForDB(connStr string) error {
-	const maxRetries = 10
 	var err error
-	var tryDB *sql.DB
+	db, err = sql.Open("postgres", dbConnStr)
+	if err != nil {
+		log.Fatal("Failed to connect to DB:", err)
+	}
 
-	for i := 1; i <= maxRetries; i++ {
-		tryDB, err = sql.Open("postgres", connStr)
-		if err == nil {
-			err = tryDB.Ping()
-			if err == nil {
-				log.Println("✅ Connected to DB")
-				tryDB.Close()
-				return nil
+	redisClient = redis.NewClient(&redis.Options{
+		Addr: config.RedisAddr,
+	})
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+
+	go consumeStream()
+
+	log.Println("Consumer started and consuming from Redis stream...")
+	select {} // Keep the main goroutine alive
+}
+
+func consumeStream() {
+	log.Println("🔄 Starting to consume from Redis stream...")
+	lastID := "$" // Only new messages after startup
+
+	for {
+		streams, err := redisClient.XRead(ctx, &redis.XReadArgs{
+			Streams: []string{"numbers-stream", lastID},
+			Count:   10,
+			Block:   0,
+		}).Result()
+		if err != nil {
+			log.Printf("❌ Stream read error: %v", err)
+			continue
+		}
+
+		if len(streams) == 0 || len(streams[0].Messages) == 0 {
+			continue // no new messages, just wait
+		}
+
+		for _, stream := range streams {
+			for i, message := range stream.Messages {
+				numStr := fmt.Sprintf("%v", message.Values["number"])
+				pubID := fmt.Sprintf("%v", message.Values["publisher_id"])
+
+				number, err := strconv.Atoi(numStr)
+				if err != nil {
+					log.Printf("❌ Failed to parse number: %v", err)
+					continue
+				}
+
+				log.Printf("✅ Consumed: %d from %s", number, pubID)
+
+				_, err = db.Exec(
+					`INSERT INTO published_numbers (number, publisher_id, received_at)
+					 VALUES ($1, $2, $3)`,
+					number, pubID, time.Now(),
+				)
+				if err != nil {
+					log.Printf("❌ Insert failed: %v", err)
+				}
+
+				if i == len(stream.Messages)-1 {
+					lastID = message.ID // Update only after processing full batch
+				}
 			}
 		}
-		log.Printf("⏳ Waiting for DB... (%d/%d)", i, maxRetries)
-		time.Sleep(3 * time.Second)
 	}
-	return fmt.Errorf("❌ Failed to connect to DB after %d attempts: %w", maxRetries, err)
 }
 
-func getEnv(key, fallback string) string {
+func getEnvWithDefault(key, fallback string) string {
 	val := os.Getenv(key)
 	if val == "" {
 		return fallback
