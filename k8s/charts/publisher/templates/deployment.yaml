@@ -1,0 +1,44 @@
+{{- range .Values.publishers }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .id }}
+  namespace: numbers-system
+spec:
+  replicas: {{ $.Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .id }}
+  template:
+    metadata:
+      labels:
+        app: {{ .id }}
+    spec:
+      {{- if $.Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- range $.Values.image.pullSecrets }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      containers:
+      - name: publisher
+        image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+        imagePullPolicy: {{ $.Values.image.pullPolicy }}
+        ports:
+        - containerPort: 8080
+        env:
+        - name: PUBLISHER_ID
+          value: "{{ .id }}"
+        - name: START_NUMBER
+          value: "{{ .startNumber }}"
+        - name: END_NUMBER
+          value: "{{ .endNumber }}"
+        - name: REDIS_ADDR
+          value: "{{ $.Values.env.redisAddr }}"
+        - name: AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.secrets.auth.secretName }}
+              key: {{ $.Values.secrets.auth.tokenKey }}
+---
+{{- end }}

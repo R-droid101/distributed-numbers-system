@@ -1,2 +1,4 @@
 .env
 **/run.sh
+k8s/secrets/*.yaml
+!k8s/secrets/*-example.yaml

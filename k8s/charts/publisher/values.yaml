@@ -1,0 +1,40 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/r-droid101/publisher
+  tag: latest
+  pullPolicy: Always
+  pullSecrets:
+    - ghcr-secret
+
+publishers:
+  - id: publisher-1
+    startNumber: 1
+    endNumber: 10
+    port: 8081
+  - id: publisher-2
+    startNumber: 11
+    endNumber: 20
+    port: 8082
+  - id: publisher-3
+    startNumber: 21
+    endNumber: 30
+    port: 8083
+  - id: publisher-4
+    startNumber: 31
+    endNumber: 40
+    port: 8084
+  - id: publisher-5
+    startNumber: 41
+    endNumber: 50
+    port: 8085
+
+env:
+  redisAddr: "redis:6379"
+
+secrets:
+  auth:
+    secretName: auth-token
+    tokenKey: token
+
+resources: {}

@@ -1,0 +1,16 @@
+{{- range .Values.publishers }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .id }}
+  namespace: numbers-system
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .id }}
+  ports:
+    - protocol: TCP
+      port: {{ .port }}
+      targetPort: 8080
+---
+{{- end }}

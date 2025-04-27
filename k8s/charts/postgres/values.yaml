@@ -1,0 +1,21 @@
+replicaCount: 1
+
+image:
+  repository: postgres
+  tag: 15
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 5432
+
+persistence:
+  enabled: true
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+
+postgresDb: numbersdb
+
+resources: {}

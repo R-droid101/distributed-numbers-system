@@ -57,6 +57,17 @@ func main() {
 		log.Fatal("Failed to connect to DB:", err)
 	}
 
+	for retries := 0; retries < 5; retries++ {
+		err := ensureTableExists(db)
+		if err == nil {
+			log.Println("Table check succeeded!")
+			break
+		}
+		log.Printf("Waiting for DB... retry %d: %v", retries+1, err)
+		time.Sleep(3 * time.Second)
+	}
+	
+
 	redisClient = redis.NewClient(&redis.Options{
 		Addr: config.RedisAddr,
 	})
@@ -126,3 +137,16 @@ func getEnvWithDefault(key, fallback string) string {
 	}
 	return val
 }
+
+func ensureTableExists(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS published_numbers (
+			id SERIAL PRIMARY KEY,
+			number INTEGER NOT NULL,
+			publisher_id TEXT NOT NULL,
+			received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	return err
+}
+
