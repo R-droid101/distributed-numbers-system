@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/redis/go-redis/v9"
 	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 )
 
 type Config struct {
@@ -66,7 +66,6 @@ func main() {
 		log.Printf("Waiting for DB... retry %d: %v", retries+1, err)
 		time.Sleep(3 * time.Second)
 	}
-	
 
 	redisClient = redis.NewClient(&redis.Options{
 		Addr: config.RedisAddr,
@@ -78,7 +77,7 @@ func main() {
 	go consumeStream()
 
 	log.Println("Consumer started and consuming from Redis stream...")
-	select {} // Keep the main goroutine alive
+	select {}
 }
 
 func consumeStream() {
@@ -92,12 +91,12 @@ func consumeStream() {
 			Block:   0,
 		}).Result()
 		if err != nil {
-			log.Printf("❌ Stream read error: %v", err)
+			log.Printf("Stream read error: %v", err)
 			continue
 		}
 
 		if len(streams) == 0 || len(streams[0].Messages) == 0 {
-			continue // no new messages, just wait
+			continue
 		}
 
 		for _, stream := range streams {
@@ -107,23 +106,35 @@ func consumeStream() {
 
 				number, err := strconv.Atoi(numStr)
 				if err != nil {
-					log.Printf("❌ Failed to parse number: %v", err)
+					log.Printf("Failed to parse number: %v", err)
 					continue
 				}
 
-				log.Printf("✅ Consumed: %d from %s", number, pubID)
+				log.Printf("Consumed: %d from %s", number, pubID)
 
-				_, err = db.Exec(
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					log.Printf("Transaction start failed: %v", err)
+					continue
+				}
+
+				_, err = tx.ExecContext(ctx,
 					`INSERT INTO published_numbers (number, publisher_id, received_at)
 					 VALUES ($1, $2, $3)`,
 					number, pubID, time.Now(),
 				)
 				if err != nil {
-					log.Printf("❌ Insert failed: %v", err)
+					tx.Rollback()
+					log.Printf("Insert failed, rolled back: %v", err)
+					continue
+				}
+
+				if err := tx.Commit(); err != nil {
+					log.Printf("Commit failed: %v", err)
 				}
 
 				if i == len(stream.Messages)-1 {
-					lastID = message.ID // Update only after processing full batch
+					lastID = message.ID
 				}
 			}
 		}
@@ -149,4 +160,3 @@ func ensureTableExists(db *sql.DB) error {
 	`)
 	return err
 }
-
